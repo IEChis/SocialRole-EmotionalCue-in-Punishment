@@ -1,0 +1,76 @@
+---
+title: "post_exp_analysis"
+author: "IEChis"
+date: "2024-11-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library('rio')
+library('bruceR')
+library(gridExtra)
+
+library(ggpubr)
+library(rstatix)
+```
+
+
+#################### (condition * party) ############# 18_Aug
+```{r}
+
+df<-import("post_exp_scores.csv")
+
+long_data <- gather(df, condition, scores, -subid)  # 相当于先转化一个键值对，然后下一步再separate配对
+# Split the condition column into separate columns
+long_data <- separate(long_data, condition, into=c("feelings","offer", "emotion", "party"), sep="_")
+# Reorder the columns
+mydata <- long_data[, c("subid", "feelings","offer", "emotion", "party", "scores")]
+
+
+new_df <- mydata %>%
+  mutate(
+    condition = case_when(
+      (offer == '10' & emotion == "Pos") ~ 1,
+      (offer == '10' & emotion == "Neg") ~ 4,
+      (offer %in% c('13', '16', '18') & emotion == "Pos") ~ 2,
+      (offer %in% c('13', '16', '18') & emotion == "Neg") ~ 3  
+    )
+  )
+
+new_df <- new_df[!new_df$subid %in% c(109,117),] #delete sub109 sub117
+new_df <- new_df[!new_df$condition=='4',]
+new_df <- new_df %>% 
+  mutate(scores = if_else(feelings == "arousal", 10-scores, scores))
+
+post_df <- new_df[!new_df$condition=='1',] #for 2( pos/neg)*2
+
+post_df$Emotion<-factor(post_df$condition,
+                        levels = c(2,3),
+                        labels = c("positive","negative"))
+
+new_df$condition<-factor(new_df$condition,
+                        levels = c(1,2,3),
+                        labels = c("fair_pos","unfair_pos","unfair_neg"))
+
+names(post_df)
+
+```
+
+
+## justice（fair）
+```{r}
+justice2<-post_df%>%filter(post_df$feelings=="fair",)#!!for 2*2
+MANOVA(justice2,dv = "scores",subID = "subid", within = c("Emotion","party"), sph.correction="GG")%>% EMMEANS("Emotion",by="party")%>% EMMEANS("party",by="Emotion")
+```
+
+## valence(pleasant)
+```{r}
+
+valence2<-post_df%>%filter(post_df$feelings=="valence",)#!!for 2*2
+MANOVA(valence2,dv = "scores",subID = "subid", within = c("Emotion","party"), sph.correction="GG")%>% EMMEANS("Emotion",by="party")%>% EMMEANS("party",by="Emotion")
+```
+
+
+

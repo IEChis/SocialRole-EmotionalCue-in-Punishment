@@ -1,0 +1,90 @@
+---
+title: "GLM"
+author: "IEChis"
+date: "2024-11-3"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+require("knitr") 
+opts_chunk$set(tidy = FALSE, warning = FALSE, message = FALSE, cache = FALSE)
+#load libraries
+suppressMessages(library("tidyverse")) # to organize data
+suppressMessages(library("afex"))  # using 'all_fit' to find appropriate optimizer; and 'mixed' for significance test
+suppressMessages(library("lme4"))  # to fit data with mixed models
+suppressMessages(library("emmeans"))  # emmeans is needed for follow-up tests 
+suppressMessages(library("multcomp")) # for advanced control for multiple testing/Type 1 errors. using 'update' for post-hoc comp
+suppressMessages(library("ggeffects")) # for plotting (G)LMM results
+suppressMessages(library('car')) # setting labeled contrasts
+suppressMessages(library("ggplot2")) # for plotting
+suppressMessages(library("ggsci")) # for setting scientific journal color palettes 
+suppressMessages(library("gridExtra")) # for arranging the position of figures
+suppressMessages(library("ggpubr")) # using the ggexport
+suppressMessages(library("sjPlot")) # using the plot_model, to show random and fixed effects.
+suppressMessages(library("glmmTMB")) #required by plot_model when plotting random effects
+suppressMessages(library("performance")) # model assumptions & performance, to use check_model for model assumptions
+suppressMessages(library("ggthemes"))#provide theme for plot
+suppressMessages(library("patchwork")) 
+suppressMessages(library("fitdistrplus")) 
+select <- dplyr::select # to avoid clashes with the MASS package
+```
+
+```{r}
+# 数据导入
+DF<-read.csv('rawdata.csv', header = TRUE)
+names(DF)
+DF<-rename(DF,Emotion=emotion,Party=party)
+
+DF<-DF[!DF$subid %in% c(109, 117),] #del subs only press o & 1
+
+DF$RT<-as.numeric(DF$RT)
+DF <- DF[!DF$RT=='0',] #del NAS
+DF$Unfair <- DF$offer_self - DF$offer_other
+
+df <-DF[!DF$Emotion=='1',]#del fair_pos
+
+df$Party<-factor(df$Party,
+                   levels = c(2,3),
+                   labels = c("SPP","TPP"))
+df$Emotion<-factor(df$Emotion,
+                        levels = c(2,3),
+                        labels = c("positive","negative"))
+
+```
+
+```{r}
+# 数据处理
+mydata <- df %>% 
+  select(subid, Emotion, Party, dec)
+
+mydata$Emotion <- factor(mydata$Emotion)
+mydata$Party <- factor(mydata$Party)
+
+```
+
+
+
+```{r}
+m2<-lmer(dec ~ 1 + Emotion * Party  + (1 + Emotion * Party | subid), data = mydata, control = lmerControl(optimizer = 'Nelder_Mead',calc.derivs = F, optCtrl = list(maxfun=2e5) ))
+AIC(m2)
+BIC(m2)
+summary(m2)
+```
+
+```{r}
+# dec.sig1 <- anova(m2,type = 3, test = 'F', ddf='Satterthwaite')  # F test
+
+dec.sig2 <- mixed(dec ~ 1 + Emotion * Party + (1 + Emotion * Party| subid), 
+                  data=mydata, method='LRT', check_contrasts = F,
+                  control = lmerControl(optimizer = 'Nelder_Mead',
+                                        calc.derivs = F,
+                                        optCtrl = list(maxfun = 2e5)))
+
+
+
+# dec.sig1
+dec.sig2
+
+```
+
+

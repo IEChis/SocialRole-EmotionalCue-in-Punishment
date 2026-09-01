@@ -1,0 +1,362 @@
+---
+title: "Untitled"
+author: "IEChis"
+date: "2026-04-21"
+output: html_document
+---
+
+```{r}
+library(emmeans)
+library(dplyr)
+library(lme4)
+library(ggplot2)
+
+```
+
+```{r}
+format_sci <- function(x) {
+  if (is.numeric(x)) {
+    formatC(x,
+            format = "e",
+            digits = 4)
+  } else {
+    x
+  }
+}
+```
+
+
+```{r}
+run_glmm_analysis <- function(file_path,
+                              split_dates,
+                              start_date = NULL,
+                              end_date = NULL) {
+
+
+  df <- read.csv(file_path)
+  df$发帖时间 <- as.POSIXct(df$发帖时间)
+
+
+  if (!is.null(start_date)) {
+    df <- df[df$发帖时间 >= as.POSIXct(start_date), ]
+  }
+
+  if (!is.null(end_date)) {
+    df <- df[df$发帖时间 <= as.POSIXct(end_date), ]
+  }
+
+  df <- df %>% arrange(发帖时间)
+
+
+  df$moral <- ifelse(df$EMO %in% c(1,4,7), 1, 0)
+  df$exposure <- log1p(df$点赞数) + 1
+
+
+  split_dates <- as.POSIXct(split_dates)
+
+  breaks <- c(min(df$发帖时间), split_dates, max(df$发帖时间))
+
+  df$period <- cut(df$发帖时间,
+                   breaks = breaks,
+                   labels = paste0("p", 1:(length(breaks)-1)),
+                   include.lowest = TRUE)
+
+  df$period <- factor(df$period)
+
+
+  model <- glmer(
+    moral ~ period + (1 | 用户id),
+    data = df,
+    family = binomial()
+  )
+
+  cat("\n========== GLMM SUMMARY ==========\n")
+  print(summary(model))
+
+
+  emm <- emmeans(model, ~ period)
+
+  pairwise <- contrast(
+    emm,
+    method = "pairwise",
+    adjust = "fdr"
+  )
+
+  cat("\n========== PAIRWISE COMPARISON ==========\n")
+  print(summary(pairwise))
+  print(summary(pairwise, type = "response"))
+  
+  pairwise_res <- as.data.frame(
+    summary(pairwise, type = "response", infer = TRUE)
+  )
+  
+  print(pairwise_res)
+  
+  
+  null_model <- glmer(
+      moral ~ (1 | 用户id),
+      data = df,
+      family = binomial()
+  )
+  
+  overall_test <- anova(null_model, model, test = "Chisq")
+  
+  cat("\n========== OVERALL FIXED EFFECT ==========\n")
+  print(overall_test)
+  
+
+  return(list(model = model,
+              emmeans = emm,
+              pairwise = pairwise,
+              data = df))
+}
+```
+
+2
+```{r}
+run_glmm_analysis <- function(file_path,
+                              split_dates,
+                              start_date = NULL,
+                              end_date = NULL) {
+
+  library(lme4)
+  library(emmeans)
+  library(dplyr)
+
+  # =========================
+  # 读取数据
+  # =========================
+  df <- read.csv(file_path)
+
+  df$发帖时间 <- as.POSIXct(df$发帖时间)
+
+  # =========================
+  # 时间筛选
+  # =========================
+  if (!is.null(start_date)) {
+    df <- df[df$发帖时间 >= as.POSIXct(start_date), ]
+  }
+
+  if (!is.null(end_date)) {
+    df <- df[df$发帖时间 <= as.POSIXct(end_date), ]
+  }
+
+  df <- df %>% arrange(发帖时间)
+
+  # =========================
+  # moral变量
+  # =========================
+  df$moral <- ifelse(df$EMO %in% c(1,4,7), 1, 0)
+
+  # exposure（目前未进入模型）
+  df$exposure <- log1p(df$点赞数) + 1
+
+  # =========================
+  # period划分
+  # =========================
+  split_dates <- as.POSIXct(split_dates)
+
+  breaks <- c(
+    min(df$发帖时间),
+    split_dates,
+    max(df$发帖时间)
+  )
+
+  df$period <- cut(
+    df$发帖时间,
+    breaks = breaks,
+    labels = paste0("p", 1:(length(breaks)-1)),
+    include.lowest = TRUE
+  )
+
+  df$period <- factor(df$period)
+
+  # =========================
+  # GLMM模型
+  # =========================
+  model <- glmer(
+    moral ~ period + (1 | 用户id),
+    data = df,
+    family = binomial()
+  )
+
+  cat("\n========== GLMM SUMMARY ==========\n")
+  print(summary(model))
+
+  # =========================
+  # Estimated marginal means
+  # =========================
+  emm <- emmeans(model, ~ period)
+
+  # =========================
+  # pairwise comparison
+  # =========================
+  pairwise <- contrast(
+    emm,
+    method = "pairwise",
+    adjust = "fdr"
+  )
+
+  cat("\n========== PAIRWISE COMPARISON ==========\n")
+
+  pairwise_res <- as.data.frame(
+    summary(pairwise,
+            type = "response",
+            infer = TRUE)
+  )
+
+  # =========================
+  # 创建用于展示的副本
+  # 不修改原始numeric列
+  # =========================
+  pairwise_display <- pairwise_res
+
+  # 科学计数法
+  pairwise_display$p.value_sci <-
+    sprintf("%.4e", pairwise_display$p.value)
+
+  # 其余列保留小数位（可选）
+  pairwise_display$odds.ratio <-
+    round(pairwise_display$odds.ratio, 4)
+
+  pairwise_display$SE <-
+    round(pairwise_display$SE, 4)
+
+  pairwise_display$asymp.LCL <-
+    round(pairwise_display$asymp.LCL, 4)
+
+  pairwise_display$asymp.UCL <-
+    round(pairwise_display$asymp.UCL, 4)
+
+  pairwise_display$z.ratio <-
+    round(pairwise_display$z.ratio, 4)
+
+  print(pairwise_display)
+
+  # =========================
+  # overall fixed effect
+  # =========================
+  null_model <- glmer(
+    moral ~ (1 | 用户id),
+    data = df,
+    family = binomial()
+  )
+
+  overall_test <- as.data.frame(
+    anova(null_model, model, test = "Chisq")
+  )
+
+  # =========================
+  # 创建展示副本
+  # =========================
+  overall_display <- overall_test
+
+  # 科学计数法
+  overall_display$Pr_Chi_sq_sci <-
+    ifelse(
+      is.na(overall_display$`Pr(>Chisq)`),
+      NA,
+      sprintf("%.4e", overall_display$`Pr(>Chisq)`)
+    )
+
+  # 其余列保留小数位（可选）
+  overall_display$AIC <-
+    round(overall_display$AIC, 4)
+
+  overall_display$BIC <-
+    round(overall_display$BIC, 4)
+
+  overall_display$logLik <-
+    round(overall_display$logLik, 4)
+
+  overall_display$deviance <-
+    round(overall_display$deviance, 4)
+
+  overall_display$Chisq <-
+    round(overall_display$Chisq, 4)
+
+  cat("\n========== OVERALL FIXED EFFECT ==========\n")
+  print(overall_display)
+
+  # =========================
+  # return
+  # =========================
+  return(list(
+    model = model,
+    emmeans = emm,
+    pairwise = pairwise_res,
+    overall = overall_test,
+    data = df
+  ))
+}
+```
+
+
+```{r}
+result <- run_glmm_analysis(
+  file_path = "AAAA吴亦凡案2_EMO-rec.csv",
+  start_date = NULL,
+  end_date = "2021-08-30",
+  split_dates = c(
+    "2021-07-19 08:06", # 吴亦凡发布声明否认
+    "2021-07-31 23:17"  # 警方通报吴亦凡因涉嫌强奸罪被刑事拘留
+    # "2021-08-16 20:30" # 朝阳检察院以涉嫌强奸罪批准逮捕吴亦凡
+  )
+)
+```
+
+
+```{r}
+result2 <- run_glmm_analysis(
+  file_path = "AAAA西贝2_EMO-rec.csv",
+  start_date = NULL,
+  end_date = "2026-01-29",
+  split_dates = c(
+    # '2025-09-11 19:53', # 西贝创始人强硬回应罗永浩称在西贝就餐发现“几乎全是预制菜，价格昂贵”的微博
+    "2025-09-15 13:19", # 西贝在连续舆论对抗失利后发布致歉信
+    "2026-01-15 00:00" # 西贝创始人在朋友圈控诉“遭铺天盖地污蔑125天”，将关店归咎于罗永浩引发的舆论冲击，被公众发现其真实态度
+  )
+)
+```
+
+
+```{r}
+result3 <- run_glmm_analysis(
+  file_path = "AAAA孙怡2_EMO-rec.csv",
+  start_date = NULL,
+  end_date = '2026-01-22', # 被曝驾驶法拉利时存在两项交通违规行为，当日迅速发文致歉
+  split_dates = c(
+    '2026-01-08 12:39'
+
+  )
+)
+```
+
+```{r}
+result4 <- run_glmm_analysis(
+  file_path = "AAAA奥迪2_EMO-rec.csv",
+  start_date = NULL,
+  end_date =  '2022-06-05',
+  split_dates = c(
+    '2022-05-22 10:13' # 奥迪官方微博删除涉事的抄袭广告，并发布声明致歉，承认监管不力、审核不严，表示视频由创意代理公司上思广告（M&CSaatchi）提报执行，已责成其处理侵权事宜
+    # '2022-05-25 07:24' # 被抄袭方再次回应，称奥迪及广告公司负责人已当面诚恳道歉，三方达成协议，他将涉事文案免费授权给奥迪使用，不收取任何费用，旨在呼吁关注原创。
+
+  )
+)
+
+```
+
+
+```{r}
+result0 <- run_glmm_analysis(
+  file_path = 'AAAAA协和_EMO-rec.csv',
+  start_date = NULL,
+  end_date = '2025-09-01',
+  split_dates = c(
+      '2025-05-01 08:28',
+      '2025-05-15 20:00',
+      '2025-08-15 17:00'
+  )
+)
+
+```
